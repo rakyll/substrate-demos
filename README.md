@@ -8,7 +8,8 @@ A collection of demos showcasing Agent Substrate.
 
 The `demo.bash` script in the [env/](env/) directory walks through the lifecycle of an Agent Substrate Environment using the `ate-env` CLI. It provisions an isolated sandbox, runs commands and batch tasks inside the guest, reads and writes files, suspends the environment to a snapshot, verifies persisted state upon resuming, and tears down the environment.
 
-### [Terminal](terminal/)
+### [Claude](claude/)
 
-An interactive web-based terminal animation demonstrating bash command execution inside a guest environment. Steps are configured via YAML files in [terminal/config/](terminal/config/).
+The [claude/](claude/) guide shows how to connect Claude Code to Agent Substrate via `claude mcp add`, routing Claude Code's file operations and shell execution into an isolated, stateful sandbox environment instead of the local host.
+
 
