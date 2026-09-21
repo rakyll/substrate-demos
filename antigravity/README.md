@@ -1,6 +1,6 @@
 # Antigravity
 
-Run Antigravity CLI (`agy`) tools (`read_file`, `write_file`, `shell`) inside an isolated Agent Substrate environment via MCP.
+Run Antigravity CLI (`agy`) tools (`read_file`, `write_file`, `shell`) inside an isolated Agent Substrate environment via the [`ate-env`](https://github.com/agent-substrate/env) MCP server.
 
 1. **Create an environment and forward the API:**
 

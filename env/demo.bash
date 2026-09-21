@@ -104,8 +104,8 @@ printf '\n%s%s  Agent Substrate Environment%s\n' "$BOLD" "$BLUE" "$RESET"
 # Preflight
 # ---------------------------------------------------------------------------
 if ! command -v ate-env &>/dev/null; then
-  printf '  %s⚠ ate-env not found in PATH, installing with go install...%s\n' "$YELLOW" "$RESET"
-  go install ./cmd/ate-env
+  printf '  %s⚠ ate-env not found. Install from https://github.com/agent-substrate/env%s\n' "$YELLOW" "$RESET"
+  go install github.com/agent-substrate/env/cmd/ate-env@latest
 fi
 
 if ! curl -s --max-time 1 "http://${API_ADDR}/healthz" &>/dev/null; then
