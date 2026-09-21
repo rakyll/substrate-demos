@@ -1,0 +1,34 @@
+# Terminal Animation Steps - Basic Bash Commands
+steps:
+  - cmd: "uname -srm"
+    out:
+      - "Linux 6.6.137-ate x86_64"
+
+  - cmd: "whoami && pwd"
+    out:
+      - "guest"
+      - "/workspace"
+
+  - cmd: "ls -la"
+    out:
+      - "total 8"
+      - "drwxr-xr-x 2 guest guest 4096 Sep 20 19:35 ."
+      - "drwxr-xr-x 3 root  root  4096 Sep 20 19:30 .."
+
+  - cmd: "echo 'Hello from Agent Substrate' > notes.txt"
+    out: []
+
+  - cmd: "cat notes.txt"
+    out:
+      - "Hello from Agent Substrate"
+
+  - cmd: "for i in 1 2 3; do echo \"Task item $i completed\"; done"
+    out:
+      - "Task item 1 completed"
+      - "Task item 2 completed"
+      - "Task item 3 completed"
+    slow: [150, 150, 150]
+
+  - cmd: "uptime"
+    out:
+      - " 19:38:00 up 12 min, 1 user, load average: 0.08, 0.03, 0.01"

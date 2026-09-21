@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Demo · Agent Substrate</title>
+  <meta name="description" content="Agent Substrate interactive terminal demo.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="inner">
+  <main id="main">
+    <section class="hero hero-demo-page">
+      <div class="wrap demo-container">
+        <div class="window window-term window-demo" id="terminal-window">
+          <div class="window-bar">
+            <span></span><span></span><span></span>
+            <button class="term-toggle" id="term-toggle" type="button" aria-label="Pause animation" title="Pause">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
+              <span>Pause</span>
+            </button>
+          </div>
+          <pre class="term" id="term" aria-live="off"><code></code></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      var el = document.getElementById('term');
+      if (!el) return;
+      var code = el.querySelector('code');
+      var toggleBtn = document.getElementById('term-toggle');
+      var termWindow = document.getElementById('terminal-window');
+
+      var cursor = null;
+      var isPaused = false;
+      var pauseResolvers = [];
+      var currentRunId = 0;
+
+      function unquote(s) {
+        if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+          if (s.startsWith('"')) {
+            try { return JSON.parse(s); } catch (e) { return s.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\'); }
+          } else {
+            return s.slice(1, -1).replace(/''/g, "'");
+          }
+        }
+        return s;
+      }
+
+      // Built-in parser for terminal steps YAML
+      function parseYAML(yaml) {
+        var lines = yaml.split('\n');
+        var steps = [];
+        var currentStep = null;
+        var currentKey = null;
+
+        for (var i = 0; i < lines.length; i++) {
+          var rawLine = lines[i];
+          var line = rawLine.replace(/#.*$/, '').trimEnd();
+          if (!line.trim()) continue;
+
+          var trimmed = line.trim();
+
+          if (trimmed.startsWith('- cmd:') || trimmed === '-' || (trimmed.startsWith('- ') && !trimmed.startsWith('- "') && !trimmed.startsWith("- '") && currentKey !== 'out' && currentKey !== 'slow')) {
+            if (currentStep) steps.push(currentStep);
+            currentStep = { cmd: '', out: [] };
+            currentKey = null;
+
+            if (trimmed.startsWith('- cmd:')) {
+              currentStep.cmd = unquote(trimmed.slice(6).trim());
+            }
+            continue;
+          }
+
+          if (!currentStep) continue;
+
+          if (trimmed.startsWith('cmd:')) {
+            currentStep.cmd = unquote(trimmed.slice(4).trim());
+            currentKey = 'cmd';
+          } else if (trimmed.startsWith('out:')) {
+            var val = trimmed.slice(4).trim();
+            currentKey = 'out';
+            if (val === '[]') {
+              currentStep.out = [];
+            }
+          } else if (trimmed.startsWith('slow:')) {
+            var val = trimmed.slice(5).trim();
+            currentKey = 'slow';
+            if (val.startsWith('[') && val.endsWith(']')) {
+              try {
+                currentStep.slow = JSON.parse(val);
+              } catch (e) {
+                currentStep.slow = val.slice(1, -1).split(',').map(function (s) { return Number(s.trim()); });
+              }
+            } else {
+              currentStep.slow = [];
+            }
+          } else if (trimmed.startsWith('- ') && currentKey === 'out') {
+            currentStep.out.push(unquote(trimmed.slice(2).trim()));
+          } else if (trimmed.startsWith('- ') && currentKey === 'slow') {
+            var item = trimmed.slice(2).trim();
+            currentStep.slow.push(Number(item));
+          }
+        }
+        if (currentStep) steps.push(currentStep);
+        return { steps: steps };
+      }
+
+      function checkPause() {
+        if (!isPaused) return Promise.resolve();
+        return new Promise(function (resolve) {
+          pauseResolvers.push(resolve);
+        });
+      }
+
+      if (toggleBtn) {
+        toggleBtn.addEventListener('click', function () {
+          isPaused = !isPaused;
+          toggleBtn.setAttribute('aria-label', isPaused ? 'Resume animation' : 'Pause animation');
+          toggleBtn.setAttribute('title', isPaused ? 'Play' : 'Pause');
+          toggleBtn.innerHTML = isPaused
+            ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg><span>Play</span>'
+            : '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg><span>Pause</span>';
+          if (!isPaused) {
+            while (pauseResolvers.length > 0) {
+              var resolve = pauseResolvers.shift();
+              resolve();
+            }
+          }
+        });
+      }
+
+      function esc(t) { return t.replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+      function follow() { el.scrollTop = el.scrollHeight; }
+
+      async function sleep(ms, runId) {
+        var remaining = ms;
+        while (remaining > 0) {
+          if (runId !== currentRunId) return;
+          await checkPause();
+          var s = Math.min(remaining, 50);
+          await new Promise(function (r) { setTimeout(r, s); });
+          if (!isPaused) {
+            remaining -= s;
+          }
+        }
+      }
+
+      function newLine() {
+        code.insertAdjacentHTML('beforeend', '<span class="prompt">$</span> <span class="cmd"></span>');
+        var cmd = code.lastElementChild;
+        cursor = document.createElement('span');
+        cursor.className = 'cursor';
+        code.appendChild(cursor);
+        follow();
+        return cmd;
+      }
+
+      async function typeCmd(text, runId) {
+        var span = newLine();
+        for (var i = 0; i < text.length; i++) {
+          if (runId !== currentRunId) return;
+          span.textContent += text[i];
+          follow();
+          await sleep(text[i] === ' ' ? 90 : 35 + Math.random() * 45, runId);
+        }
+        await sleep(350, runId);
+        if (cursor && cursor.parentNode) cursor.remove();
+        code.insertAdjacentHTML('beforeend', '\n');
+      }
+
+      async function printOut(lines, slow, runId) {
+        for (var i = 0; i < lines.length; i++) {
+          if (runId !== currentRunId) return;
+          await sleep(slow && slow[i] != null ? slow[i] : 120, runId);
+          code.insertAdjacentHTML('beforeend', '<span class="out">' + esc(lines[i]) + '</span>\n');
+          follow();
+        }
+      }
+
+      async function startAnimation(steps) {
+        var runId = ++currentRunId;
+        isPaused = false;
+        pauseResolvers = [];
+        if (toggleBtn) {
+          toggleBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg><span>Pause</span>';
+        }
+
+        for (; ;) {
+          if (runId !== currentRunId) return;
+          code.innerHTML = '';
+          el.scrollTop = 0;
+          for (var i = 0; i < steps.length; i++) {
+            if (runId !== currentRunId) return;
+            await typeCmd(steps[i].cmd, runId);
+            await printOut(steps[i].out || [], steps[i].slow, runId);
+            await sleep(500, runId);
+          }
+          if (runId !== currentRunId) return;
+          newLine();
+          await sleep(4500, runId);
+        }
+      }
+
+      function loadYAMLText(yamlText) {
+        try {
+          var parsed = parseYAML(yamlText);
+          if (!parsed.steps || !parsed.steps.length) {
+            throw new Error('No steps found in YAML');
+          }
+          startAnimation(parsed.steps);
+        } catch (err) {
+          code.innerHTML = '<span class="out" style="color:var(--pink);">Failed to parse YAML: ' + esc(err.message) + '</span>\n';
+        }
+      }
+
+      // Handle drag & drop
+      if (termWindow) {
+        termWindow.addEventListener('dragover', function (e) {
+          e.preventDefault();
+        });
+        termWindow.addEventListener('drop', function (e) {
+          e.preventDefault();
+          var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+          if (!file) return;
+          var reader = new FileReader();
+          reader.onload = function (evt) {
+            loadYAMLText(evt.target.result, file.name);
+          };
+          reader.readAsText(file);
+        });
+      }
+
+      // Load initial YAML config from URL param or default config/demo.yaml
+      var params = new URLSearchParams(window.location.search);
+      var configPath = params.get('config') || 'config/demo.yaml';
+
+      fetch(configPath)
+        .then(function (res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.text();
+        })
+        .then(function (text) {
+          loadYAMLText(text, configPath);
+        })
+        .catch(function (err) {
+          // If fetch fails (e.g. running from file://), load embedded fallback
+          var fallback = [
+            "# Basic Bash Commands Demo",
+            "steps:",
+            "  - cmd: \"uname -srm\"",
+            "    out:",
+            "      - \"Linux 6.6.137-ate x86_64\"",
+            "  - cmd: \"whoami && pwd\"",
+            "    out:",
+            "      - \"guest\"",
+            "      - \"/workspace\"",
+            "  - cmd: \"ls -la\"",
+            "    out:",
+            "      - \"total 8\"",
+            "      - \"drwxr-xr-x 2 guest guest 4096 Sep 20 19:35 .\"",
+            "      - \"drwxr-xr-x 3 root  root  4096 Sep 20 19:30 ..\"",
+            "  - cmd: \"echo 'Hello from Agent Substrate' > notes.txt\"",
+            "    out: []",
+            "  - cmd: \"cat notes.txt\"",
+            "    out:",
+            "      - \"Hello from Agent Substrate\"",
+            "  - cmd: \"for i in 1 2 3; do echo \\\"Task item $i completed\\\"; done\"",
+            "    out:",
+            "      - \"Task item 1 completed\"",
+            "      - \"Task item 2 completed\"",
+            "      - \"Task item 3 completed\"",
+            "    slow: [150, 150, 150]",
+            "  - cmd: \"uptime\"",
+            "    out:",
+            "      - \" 19:38:00 up 12 min, 1 user, load average: 0.08, 0.03, 0.01\""
+          ].join('\n');
+          loadYAMLText(fallback);
+        });
+    })();
+  </script>
+</body>
+</html>
